@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Manage parts of solr
+## Usage: solrctl
+## Example: ddev solrctl
+
+CMD=$1
+YAML_FILE=/mnt/ddev_config/typo3-solr/config.yaml
+SOLR_VOLUME=.ddev/typo3-solr/data/
+SOLR_HOST=typo3-solr
+
+case $CMD in
+  apply)
+    echo "Apply config $YAML_FILE"
+
+    solr_ext_path=$(yq eval '.extension_path' "$YAML_FILE")
+    if [ ! -d "$solr_ext_path" ]; then
+      echo "Solr config path $solr_ext_path does not exist."
+      echo "Is Solr already installed?"
+      echo "* Yes: run 'composer install'"
+      echo "* No: run 'composer req apache-solr-for-typo3/solr'"
+      exit 1
+    fi
+
+    configset=$(yq eval '.configset' "$YAML_FILE")
+
+    mkdir -p "$SOLR_VOLUME"
+    cp -r "${solr_ext_path}"solr.xml "$SOLR_VOLUME"
+    cp -r "${solr_ext_path}"configsets "$SOLR_VOLUME"
+
+    readarray cores_array < <(yq -o=j -I=0 '.cores.[]' $YAML_FILE)
+
+    for core in "${cores_array[@]}"; do
+      name=$(echo "$core" | yq '.name // ""' -)
+      schema=$(echo "$core" | yq '.schema // ""' -)
+      api_url="http://${SOLR_HOST}:8983/solr/admin/cores?action=CREATE&name=${name}&configSet=${configset}&schema=${schema}&dataDir=data/"
+      response=$(curl -s "$api_url")
+      response_code=$?
+      status=$(echo $response | yq '.responseHeader.status')
+
+      if [ "$status" -eq 0 ]; then
+        echo "✅ Core '$name' created"
+      else
+        error_message=$(echo "$response" | yq '.error.msg')
+        echo "ℹ️ $error_message"
+      fi
+    done
+    ;;
+
+  wipe)
+    api_url="http://${SOLR_HOST}:8983/solr/admin/cores?action=STATUS&wt=json"
+    response=$(curl -s "$api_url")
+    response_code=$?
+    status=$(echo $response | yq '.responseHeader.status')
+
+    if [ "$response_code" -gt 0 ]; then
+      echo "❌ Failed to call solr API on $api_url"
+    else
+      readarray cores_array < <(echo $response | yq -o=j -I=0 '.status.[] // 0')
+      if [ $cores_array -eq 0 ]; then
+          echo "ℹ️ No cores available to delete"
+          exit 0
+      fi
+
+      for core in "${cores_array[@]}"; do
+        name=$(echo "$core" | yq '.name // ""' -)
+        api_delete_url="http://${SOLR_HOST}:8983/solr/admin/cores?action=UNLOAD&core=$name&deleteIndex=true"
+        response=$(curl -s -X POST -H 'Content-type: application/json' "$api_delete_url")
+        response_code=$?
+        status=$(echo $response | yq '.responseHeader.status')
+
+        if [ "$status" -eq 0 ]; then
+            echo "✅ Core '$name' deleted"
+        else
+            error_message=$(echo "$response" | yq '.error.msg')
+            echo "ℹ️ Core '$name' - $error_message"
+        fi
+
+        rm -rf "${SOLR_VOLUME:?}$name"
+      done
+    fi
+
+    rm -rf "${SOLR_VOLUME:?}configsets"
+    rm -rf "${SOLR_VOLUME:?}solr.xml"
+    ;;
+
+  --help|*)
+    # @todo: show some useful information
+    ;;
+esac

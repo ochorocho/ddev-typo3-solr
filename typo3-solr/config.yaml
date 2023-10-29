@@ -1,0 +1,15 @@
+#ddev-generated
+# @todo: allow to define a version??!?!
+# solr_version: ''
+
+# Points to the solr configuration provided by apache-solr-for-typo3/solr
+extension_path: 'vendor/apache-solr-for-typo3/solr/Resources/Private/Solr/'
+
+# Watch out, the configset changes depending on
+# apache-solr-for-typo3/solr version used!
+configset: 'ext_solr_12_0_0'
+cores:
+  - name: "core_en"
+    schema: "english/schema.xml"
+  - name: "core_de"
+    schema: "german/schema.xml"
